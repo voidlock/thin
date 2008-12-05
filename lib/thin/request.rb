@@ -32,6 +32,8 @@ module Thin
     RACK_MULTITHREAD  = 'rack.multithread'.freeze
     RACK_MULTIPROCESS = 'rack.multiprocess'.freeze
     RACK_RUN_ONCE     = 'rack.run_once'.freeze
+    RACK_DEFERRED     = 'rack.deferred'.freeze
+    RACK_CALLBACK     = 'rack.callback'.freeze
 
     # CGI-like request environment variables
     attr_reader :env
@@ -56,6 +58,7 @@ module Thin
         RACK_VERSION      => VERSION::RACK,
         RACK_ERRORS       => STDERR,
 
+        RACK_DEFERRED     => false,
         RACK_MULTITHREAD  => false,
         RACK_MULTIPROCESS => false,
         RACK_RUN_ONCE     => false
@@ -120,6 +123,15 @@ module Thin
 
     def forwarded_for
       @env[FORWARDED_FOR]
+    end
+
+    def deferred=(value)
+      @env[RACK_DEFERRED] = value
+    end
+
+    def callback(pr = nil, &block)
+      deferred = true
+      @env[RACK_CALLBACK] = (pr || block)
     end
 
     def threaded=(value)

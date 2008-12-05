@@ -26,6 +26,7 @@ module Thin
     # Calling the application in a threaded allowing
     # concurrent processing of requests.
     attr_writer :threaded
+    attr_writer :deferred
 
     # Get the connection ready to process a request.
     def post_init
@@ -46,10 +47,17 @@ module Thin
     # Called when all data was received and the request
     # is ready to be processed.
     def process
-      if threaded?
+      if deferred?
+        @request.threaded = false
+        @request.deferred = true
+        @request.deferred_callback( method(:post_process) )
+        EventMachine.next_tick( method(:pre_process) )
+      elsif threaded?
         @request.threaded = true
+        @request.evented = false
         EventMachine.defer(method(:pre_process), method(:post_process))
       else
+        @request.evented = false
         @request.threaded = false
         post_process(pre_process)
       end
@@ -140,7 +148,11 @@ module Thin
     # You can set all requests as threaded setting <tt>Connection#threaded=true</tt>
     # or on a per-request case returning +true+ in <tt>app.deferred?</tt>.
     def threaded?
-      @threaded || (@app.respond_to?(:deferred?) && @app.deferred?(@request.env))
+      @threaded || (@app.respond_to?(:threaded?) && @app.threaded?(@request.env))
+    end
+
+    def deferred?
+      @deferred || (@app.respond_to?(:deferred?) && @app.deferred?(@request.env))
     end
 
     # IP Address of the remote client.
