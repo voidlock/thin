@@ -54,10 +54,10 @@ module Thin
         EventMachine.next_tick( method(:pre_process) )
       elsif threaded?
         @request.threaded = true
-        @request.evented = false
+        @request.deferred = false
         EventMachine.defer(method(:pre_process), method(:post_process))
       else
-        @request.evented = false
+        @request.deferred = false
         @request.threaded = false
         post_process(pre_process)
       end
