@@ -48,10 +48,9 @@ module Thin
     # is ready to be processed.
     def process
       if deferred?
-        @request.threaded = false
         @request.deferred = true
-        @request.deferred_callback( method(:post_process) )
-        EventMachine.next_tick( method(:pre_process) )
+        @request.threaded = false
+        defer_pre_process.callback { |rack_response| post_process( rack_response ) } 
       elsif threaded?
         @request.threaded = true
         @request.deferred = false
@@ -61,6 +60,43 @@ module Thin
         @request.threaded = false
         post_process(pre_process)
       end
+    end
+
+    def defer_pre_process
+      deferrable = @request.deferrable = EventMachine::DefaultDeferrable.new
+
+      # make sure we timeout
+      deferrable.timeout( @backend.timeout )
+
+      # handle any errors
+      deferrable.errback do
+        handle_error
+        terminate_request
+        post_process( nil )
+      end
+
+      # TODO Remove this in favor of @request.deferrable
+      @request.deferred_callback { |rack_response| deferrable.succeed( rack_response ) }
+
+      EventMachine.next_tick do
+        begin
+          # Add client info to the request env
+          @request.remote_address = remote_address
+
+          # Process the request calling the Rack adapter
+          rack_response = @app.call(@request.env)
+          if rack_response.is_a?( Array )
+            log "!! Rack application returned response right away. Probably you wanted defer writing the response until later?"
+
+            # FIXME should this fail if body is not nil?
+            deferrable.succeed( rack_response ) unless rack_response.last.nil?
+          end
+        rescue Exception
+          deferrable.fail
+        end
+      end
+
+      deferrable
     end
 
     def pre_process
