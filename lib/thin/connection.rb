@@ -50,7 +50,7 @@ module Thin
       if deferred?
         @request.deferred = true
         @request.threaded = false
-        defer_pre_process.callback { |rack_response| post_process( rack_response ) } 
+        defer_processing
       elsif threaded?
         @request.threaded = true
         @request.deferred = false
@@ -62,41 +62,29 @@ module Thin
       end
     end
 
-    def defer_pre_process
+    def defer_processing( &block )
+      # create and store deferrable on rack env variables
       deferrable = @request.deferrable = EventMachine::DefaultDeferrable.new
 
-      # make sure we timeout
+      # make sure we timeout correctly
       deferrable.timeout( @backend.timeout )
+
+      # success trigger the post processing
+      deferrable.callback { |rack_response| post_process( rack_response ) }
 
       # handle any errors
       deferrable.errback do
         handle_error
         terminate_request
-        post_process( nil )
       end
 
-      # TODO Remove this in favor of @request.deferrable
-      @request.deferred_callback { |rack_response| deferrable.succeed( rack_response ) }
+      # Add client info to the request env
+      @request.remote_address = remote_address
 
-      EventMachine.next_tick do
-        begin
-          # Add client info to the request env
-          @request.remote_address = remote_address
-
-          # Process the request calling the Rack adapter
-          rack_response = @app.call(@request.env)
-          if rack_response.is_a?( Array )
-            log "!! Rack application returned response right away. Probably you wanted defer writing the response until later?"
-
-            # FIXME should this fail if body is not nil?
-            deferrable.succeed( rack_response ) unless rack_response.last.nil?
-          end
-        rescue Exception
-          deferrable.fail
-        end
-      end
-
-      deferrable
+      # Process the request calling the Rack adapter
+      raise Exception, "Rack application response not sent through Deferrable instance." if @app.call( @request.env )
+    rescue Exception
+      deferrable.fail
     end
 
     def pre_process
@@ -140,8 +128,10 @@ module Thin
 
     # Logs catched exception and closes the connection.
     def handle_error
-      log "!! Unexpected error while processing request: #{$!.message}"
-      log_error
+      if $!
+        log "!! Unexpected error while processing request: #{$!.message}"
+        log_error
+      end
       close_connection rescue nil
     end
 
