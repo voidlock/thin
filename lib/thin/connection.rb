@@ -82,7 +82,13 @@ module Thin
       @request.remote_address = remote_address
 
       # Process the request calling the Rack adapter
-      raise Exception, "Rack application response not sent through Deferrable instance." if @app.call( @request.env )
+      EventMachine.next_tick do
+        if early_response = @app.call( @request.env )
+          # raise Exception, "Rack application response not sent through Deferrable instance."
+          log "!! Rack application response not sent through Deferrable instance."
+          deferrable.succeed early_response
+        end
+      end
     rescue Exception
       deferrable.fail
     end
